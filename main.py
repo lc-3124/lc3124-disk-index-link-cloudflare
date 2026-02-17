@@ -3,6 +3,7 @@
 import subprocess
 import re
 import html
+import json
 from datetime import datetime
 
 # -------------------------- 配置项 --------------------------
@@ -12,6 +13,7 @@ OSS_PUBLIC_URL = "https://lc3124-web-disk.oss-cn-beijing.aliyuncs.com/"
 # ------------------------------------------------------------
 
 def format_file_size(size_bytes):
+    """格式化文件大小为易读格式"""
     if size_bytes == 0:
         return "0 B"
     size_names = ["B", "KB", "MB", "GB"]
@@ -21,7 +23,34 @@ def format_file_size(size_bytes):
         i += 1
     return f"{size_bytes:.2f} {size_names[i]}"
 
+def get_file_icon(file_name):
+    """根据文件名后缀返回对应的图标"""
+    ext = file_name.lower().split('.')[-1] if '.' in file_name else ''
+    
+    # 文档类
+    if ext in ['txt', 'md', 'doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx']:
+        return '📄' if ext in ['txt', 'md'] else '📃' if ext == 'pdf' else '📊'
+    # 图片类
+    elif ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']:
+        return '🖼️'
+    # 音频类
+    elif ext in ['mp3', 'wav', 'flac', 'm4a', 'ogg']:
+        return '🎵'
+    # 视频类
+    elif ext in ['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv']:
+        return '🎬'
+    # 压缩包
+    elif ext in ['zip', 'rar', '7z', 'tar', 'gz']:
+        return '🗜️'
+    # 代码类
+    elif ext in ['py', 'js', 'html', 'css', 'java', 'cpp', 'c', 'php']:
+        return '💻'
+    # 其他
+    else:
+        return '📎'
+
 def parse_oss_output(output):
+    """解析ossutil输出，提取文件信息"""
     files_info = []
     pattern = r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) .*? (\d+) .*? oss://lc3124-web-disk/(.*)"
     for line in output.split("\n"):
@@ -42,6 +71,7 @@ def parse_oss_output(output):
             download_url = f"{OSS_PUBLIC_URL}{html.escape(file_path)}"
             files_info.append({
                 "path": file_path,
+                "name": file_path.split('/')[-1],
                 "size": file_size,
                 "size_str": format_file_size(file_size),
                 "modify_time": formatted_time,
@@ -49,249 +79,1072 @@ def parse_oss_output(output):
             })
     return files_info
 
-def build_directory_tree(files_info):
-    root = {"type": "dir", "name": "lc3124-web-disk", "children": {}}
-    for file_info in files_info:
-        path_parts = file_info["path"].split("/")
-        current = root
-        for i, part in enumerate(path_parts):
-            if not part:
-                continue
-            if i == len(path_parts) - 1:
-                current["children"][part] = {
-                    "type": "file",
-                    "name": part,
-                    "size_str": file_info["size_str"],
-                    "modify_time": file_info["modify_time"],
-                    "download_url": file_info["download_url"]
-                }
-            else:
-                if part not in current["children"]:
-                    current["children"][part] = {"type": "dir", "name": part, "children": {}}
-                current = current["children"][part]
-    return root
-
-def generate_html_tree(node, level=0):
-    html_parts = []
-    indent = level * 22
-    if node["type"] == "dir":
-        dir_name = html.escape(node["name"])
-        html_parts.append(f'''
-        <div class="directory" style="margin-left:{indent}px">
-            <div class="dir-header">
-                <span class="icon folder-icon">📁</span>
-                <span class="name">{dir_name}</span>
-                <button class="btn dl-folder-btn" onclick="downloadFolder(this)">下载文件夹(开发中)</button>
-            </div>
-            <div class="dir-children" style="display:none">
-        ''')
-        for child in sorted(node["children"].values(), key=lambda x: (x["type"], x["name"])):
-            html_parts.append(generate_html_tree(child, level + 1))
-        html_parts.append('</div></div>')
-    else:
-        name = html.escape(node["name"])
-        size = html.escape(node["size_str"])
-        mtime = html.escape(node["modify_time"])
-        url = node["download_url"]
-        html_parts.append(f'''
-        <div class="file" style="margin-left:{indent}px">
-            <span class="icon file-icon">📄</span>
-            <span class="name" title="{name}">{name}</span>
-            <span class="meta">{size} · {mtime}</span>
-            <div class="btn-group">
-                <a href="{url}" target="_blank" class="btn preview-btn">预览</a>
-                <a href="{url}" download class="btn download-btn">下载</a>
-            </div>
-        </div>
-        ''')
-    return "".join(html_parts)
-
-def generate_html(root_node):
-    tree_html = generate_html_tree(root_node)
+def generate_html(files_info):
+    """生成完整的HTML页面"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    return f'''
+    files_json = json.dumps(files_info)
+    head_img_url = f"head.jpg"
+    
+    html_content = f'''
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Lc3124的文件库</title>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box;font-family:Segoe UI,Microsoft YaHei,sans-serif}}
-body{{
-    background:linear-gradient(145deg,#0f172a 0%,#1e293b 50%,#0f172a 100%);
-    color:#e2e8f0;
-    padding:2rem;
-    max-width:1400px;
-    margin:0 auto;
-    min-height:100vh
-}}
-.header{{
-    text-align:center;
-    margin-bottom:2rem;
-    padding-bottom:1rem;
-    border-bottom:2px solid #38bdf8
-}}
-.header h1{{
-    color:#38bdf8;
-    font-size:2.2rem
-}}
-.header p{{
-    color:#94a3b8;
-    margin-top:8px
-}}
-.directory-tree{{
-    background:#1e293b;
-    border-radius:12px;
-    box-shadow:0 0 30px rgba(56,189,248,0.15);
-    padding:2.5rem;
-    border:1px solid #334155;
-    overflow-x:auto
-}}
-.directory{{margin:6px 0}}
-.dir-header{{
-    padding:10px 16px;
-    border-radius:8px;
-    background:#27374d;
-    display:flex;
-    align-items:center;
-    gap:10px;
-    cursor:pointer;
-    transition:.2s
-}}
-.dir-header:hover{{
-    background:#334155;
-    border-left:3px solid #38bdf8
-}}
-.dir-header .name{{
-    flex:1;
-    font-weight:600;
-    color:#38bdf8
-}}
-.file{{
-    padding:9px 16px;
-    border-radius:8px;
-    background:#212f45;
-    display:flex;
-    align-items:center;
-    gap:12px;
-    margin:4px 0;
-    transition:.2s
-}}
-.file:hover{{
-    background:#27374d;
-    border-left:3px solid #60a5fa
-}}
-.file .name{{
-    flex:1;
-    white-space:nowrap;
-    overflow:hidden;
-    text-overflow:ellipsis
-}}
-.meta{{
-    color:#94a3b8;
-    font-size:0.85rem;
-    white-space:nowrap
-}}
-.icon{{width:24px;text-align:center}}
-.folder-icon{{color:#fbbf24}}
-.file-icon{{color:#60a5fa}}
-.btn-group{{display:flex;gap:6px}}
-.btn{{
-    padding:4px 10px;
-    border:none;
-    border-radius:6px;
-    font-size:0.85rem;
-    cursor:pointer;
-    text-decoration:none;
-    transition:.2s
-}}
-.preview-btn{{
-    background:#27374d;
-    color:#93c5fd
-}}
-.download-btn,.dl-folder-btn{{
-    background:#0369a1;
-    color:#fff
-}}
-.btn:hover{{opacity:0.85}}
-.footer{{
-    margin-top:2.5rem;
-    text-align:center;
-    color:#94a3b8;
-    padding-top:1rem;
-    border-top:1px solid #334155
-}}
-</style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lc3124的文件库</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', 'Microsoft YaHei', sans-serif;
+        }}
+
+        :root {{
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --bg-quaternary: #30363d;
+            --accent-primary: #58a6ff;
+            --accent-secondary: #79c0ff;
+            --accent-gold: #d4a574;
+            --accent-light: #c9d1d9;
+            --text-primary: #f0f6fc;
+            --text-secondary: #c9d1d9;
+            --text-tertiary: #8b949e;
+            --shadow-light: 0 3px 12px rgba(88, 166, 255, 0.08);
+            --shadow-medium: 0 6px 20px rgba(88, 166, 255, 0.12);
+            --shadow-heavy: 0 12px 48px rgba(0, 0, 0, 0.3);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }}
+
+        body {{
+            background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #1c2128 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 1rem;
+            line-height: 1.6;
+            position: relative;
+            overflow-x: hidden;
+        }}
+
+        body::before {{
+            content: '';
+            position: fixed;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 50% 50%, rgba(88, 166, 255, 0.02) 0%, transparent 70%);
+            pointer-events: none;
+            animation: floatGradient 25s ease-in-out infinite;
+            z-index: 0;
+        }}
+
+        @keyframes floatGradient {{
+            0%, 100% {{ transform: translate(0, 0); }}
+            50% {{ transform: translate(40px, 40px); }}
+        }}
+
+        .container {{
+            max-width: 1120px;
+            margin: 0 auto;
+            padding: 0;
+            position: relative;
+            z-index: 1;
+        }}
+
+        header {{
+            text-align: center;
+            margin-bottom: 2rem;
+            padding: 2.5rem 2rem;
+            border-radius: var(--radius-lg);
+            background: linear-gradient(135deg, rgba(22, 27, 34, 0.9) 0%, rgba(33, 38, 45, 0.7) 100%);
+            backdrop-filter: blur(20px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 2px rgba(88, 166, 255, 0.08);
+            border: 1px solid rgba(88, 166, 255, 0.15);
+            position: relative;
+            overflow: hidden;
+        }}
+
+        header::before {{
+            content: '';
+            position: absolute;
+            top: -100%;
+            right: -100%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(88, 166, 255, 0.08) 0%, transparent 70%);
+            animation: headerFloat 8s ease-in-out infinite;
+        }}
+
+        @keyframes headerFloat {{
+            0%, 100% {{ transform: translate(0, 0); }}
+            50% {{ transform: translate(50px, 50px); }}
+        }}
+
+        header > * {{
+            position: relative;
+            z-index: 2;
+        }}
+
+        header h1 {{
+            background: linear-gradient(135deg, #58a6ff 0%, #79c0ff 50%, #b692f6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 2.2rem;
+            margin-bottom: 0.6rem;
+            letter-spacing: -0.5px;
+            font-weight: 700;
+        }}
+
+        header .subtitle {{
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            margin-bottom: 1.8rem;
+            font-weight: 400;
+            letter-spacing: 0.3px;
+        }}
+
+        .header-controls {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            justify-content: center;
+            align-items: center;
+            max-width: 580px;
+            margin: 0 auto;
+        }}
+
+        .search-box {{
+            flex: 1;
+            min-width: 240px;
+            position: relative;
+        }}
+
+        .search-box input {{
+            width: 100%;
+            padding: 12px 18px;
+            border: 2px solid rgba(88, 166, 255, 0.25);
+            border-radius: 50px;
+            background: rgba(33, 38, 45, 0.6);
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            transition: var(--transition);
+            outline: none;
+            backdrop-filter: blur(10px);
+        }}
+
+        .search-box input:focus {{
+            border-color: var(--accent-primary);
+            background: rgba(33, 38, 45, 0.9);
+            box-shadow: 0 0 0 4px rgba(88, 166, 255, 0.15), 0 8px 16px rgba(88, 166, 255, 0.15);
+            transform: translateY(-2px);
+        }}
+
+        .search-box input::placeholder {{
+            color: var(--text-tertiary);
+        }}
+
+        .view-toggle {{
+            display: flex;
+            background: rgba(33, 38, 45, 0.6);
+            border-radius: 50px;
+            padding: 4px;
+            border: 2px solid rgba(88, 166, 255, 0.25);
+            backdrop-filter: blur(10px);
+            gap: 2px;
+        }}
+
+        .view-btn {{
+            padding: 8px 16px;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            border-radius: 50px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+
+        .view-btn:hover {{
+            color: var(--accent-primary);
+            transform: translateY(-1px);
+        }}
+
+        .view-btn.active {{
+            background: linear-gradient(135deg, #58a6ff, #79c0ff);
+            color: #0d1117;
+            box-shadow: 0 4px 12px rgba(88, 166, 255, 0.3);
+            font-weight: 600;
+        }}
+
+        .breadcrumb {{
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 1.5rem;
+            padding: 12px 16px;
+            background: rgba(33, 38, 45, 0.6);
+            border-radius: var(--radius-md);
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            border: 1px solid rgba(88, 166, 255, 0.15);
+            backdrop-filter: blur(10px);
+        }}
+
+        .breadcrumb-item {{
+            cursor: pointer;
+            transition: var(--transition);
+            padding: 4px 10px;
+            border-radius: var(--radius-sm);
+            font-weight: 500;
+        }}
+
+        .breadcrumb-item:hover {{
+            color: var(--accent-primary);
+            background: rgba(88, 166, 255, 0.1);
+            transform: translateX(2px);
+        }}
+
+        .breadcrumb-item.active {{
+            color: var(--accent-primary);
+            font-weight: 600;
+        }}
+
+        .breadcrumb-separator {{
+            color: var(--text-tertiary);
+            opacity: 0.6;
+        }}
+
+        main {{
+            background: rgba(22, 27, 34, 0.8);
+            border-radius: var(--radius-lg);
+            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4), inset 0 1px 2px rgba(88, 166, 255, 0.08);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            border: 1px solid rgba(88, 166, 255, 0.12);
+            min-height: 400px;
+            backdrop-filter: blur(20px);
+        }}
+
+        .grid-view {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 1.2rem;
+        }}
+
+        .list-view {{
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+        }}
+
+        .card {{
+            background: linear-gradient(135deg, rgba(48, 54, 61, 0.6) 0%, rgba(33, 38, 45, 0.4) 100%);
+            border-radius: var(--radius-md);
+            padding: 1.3rem;
+            transition: var(--transition);
+            cursor: pointer;
+            border: 1px solid rgba(88, 166, 255, 0.15);
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+            backdrop-filter: blur(10px);
+            position: relative;
+            overflow: hidden;
+        }}
+
+        .card::before {{
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(88, 166, 255, 0.12), transparent);
+            transition: left 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+            pointer-events: none;
+        }}
+
+        .card:hover {{
+            background: linear-gradient(135deg, rgba(58, 72, 90, 0.8) 0%, rgba(48, 54, 61, 0.6) 100%);
+            transform: translateY(-4px);
+            border-color: var(--accent-primary);
+            box-shadow: 0 16px 32px rgba(88, 166, 255, 0.15), inset 0 1px 2px rgba(88, 166, 255, 0.08);
+        }}
+
+        .card:hover::before {{
+            left: 100%;
+        }}
+
+        .list-view .card {{
+            flex-direction: row;
+            align-items: center;
+            padding: 1rem 1.3rem;
+            gap: 1.2rem;
+        }}
+
+        .list-view .card:hover {{
+            transform: translateX(4px);
+        }}
+
+        .card-icon {{
+            font-size: 2.4rem;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+            filter: drop-shadow(0 2px 4px rgba(88, 166, 255, 0.1));
+        }}
+
+        .list-view .card-icon {{
+            font-size: 1.6rem;
+            min-width: 50px;
+        }}
+
+        .card-name {{
+            font-size: 0.98rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            text-align: center;
+            word-break: break-word;
+            position: relative;
+            z-index: 1;
+        }}
+
+        .list-view .card-name {{
+            text-align: left;
+            flex: 1;
+            font-size: 0.95rem;
+        }}
+
+        .card-meta {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            color: var(--text-tertiary);
+            margin-top: auto;
+            position: relative;
+            z-index: 1;
+        }}
+
+        .list-view .card-meta {{
+            margin-top: 0;
+            flex-direction: column;
+            gap: 3px;
+            min-width: 140px;
+            text-align: right;
+        }}
+
+        .card-actions {{
+            display: flex;
+            gap: 8px;
+            margin-top: 0.5rem;
+            position: relative;
+            z-index: 1;
+        }}
+
+        .list-view .card-actions {{
+            margin-top: 0;
+            min-width: 150px;
+            gap: 10px;
+        }}
+
+        .card-actions .btn {{
+            flex: 1;
+            text-align: center;
+        }}
+
+        .btn {{
+            padding: 8px 14px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-size: 0.8rem;
+            cursor: pointer;
+            text-decoration: none;
+            transition: var(--transition);
+            font-weight: 500;
+            display: inline-block;
+        }}
+
+        .btn-primary {{
+            background: linear-gradient(135deg, #58a6ff, #79c0ff);
+            color: #0d1117;
+            box-shadow: 0 4px 12px rgba(88, 166, 255, 0.25);
+        }}
+
+        .btn-primary:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(88, 166, 255, 0.35);
+        }}
+
+        .btn-secondary {{
+            background: rgba(88, 166, 255, 0.1);
+            color: var(--accent-secondary);
+            border: 1.5px solid rgba(88, 166, 255, 0.3);
+        }}
+
+        .btn-secondary:hover {{
+            background: rgba(88, 166, 255, 0.2);
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+            transform: translateY(-1px);
+        }}
+
+        .empty-state {{
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-secondary);
+        }}
+
+        .empty-state-icon {{
+            font-size: 4rem;
+            margin-bottom: 1.2rem;
+            opacity: 0.4;
+            animation: floatIcon 3s ease-in-out infinite;
+        }}
+
+        @keyframes floatIcon {{
+            0%, 100% {{ transform: translateY(0); }}
+            50% {{ transform: translateY(-10px); }}
+        }}
+
+        .empty-state p {{
+            font-size: 1rem;
+        }}
+
+        footer {{
+            border-radius: var(--radius-lg);
+            background: linear-gradient(135deg, rgba(22, 27, 34, 0.9) 0%, rgba(33, 38, 45, 0.7) 100%);
+            backdrop-filter: blur(20px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 2px rgba(88, 166, 255, 0.08);
+            padding: 3rem 2rem;
+            border: 1px solid rgba(88, 166, 255, 0.15);
+        }}
+
+        .footer-content {{
+            max-width: 780px;
+            margin: 0 auto;
+            text-align: center;
+        }}
+
+        .author-section {{
+            margin-bottom: 2.5rem;
+        }}
+
+        .author-avatar {{
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #58a6ff, #79c0ff);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1.2rem;
+            overflow: hidden;
+            box-shadow: 0 12px 32px rgba(88, 166, 255, 0.3);
+            border: 3px solid rgba(88, 166, 255, 0.3);
+            animation: floatAvatar 3.5s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+        }}
+
+        @keyframes floatAvatar {{
+            0%, 100% {{ transform: translateY(0); }}
+            50% {{ transform: translateY(-10px); }}
+        }}
+
+        .author-avatar img {{
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }}
+
+        .author-name {{
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, #58a6ff, #79c0ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.6rem;
+        }}
+
+        .author-tagline {{
+            color: var(--text-secondary);
+            font-size: 1rem;
+            margin-bottom: 1.8rem;
+            font-style: italic;
+            font-weight: 400;
+        }}
+
+        .author-links {{
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 0.9rem;
+            margin-bottom: 2.5rem;
+        }}
+
+        .author-link {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 18px;
+            background: rgba(88, 166, 255, 0.08);
+            border-radius: 50px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: var(--transition);
+            font-size: 0.85rem;
+            border: 1.5px solid rgba(88, 166, 255, 0.25);
+            font-weight: 500;
+        }}
+
+        .author-link:hover {{
+            background: rgba(88, 166, 255, 0.15);
+            color: var(--accent-primary);
+            border-color: var(--accent-primary);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 16px rgba(88, 166, 255, 0.2);
+        }}
+
+        .footer-info {{
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.9;
+            padding-top: 2rem;
+            border-top: 1px solid rgba(88, 166, 255, 0.12);
+        }}
+
+        .footer-info p {{
+            margin-bottom: 0.8rem;
+        }}
+
+        .footer-info a {{
+            color: var(--accent-gold);
+            text-decoration: none;
+            transition: var(--transition);
+            font-weight: 500;
+        }}
+
+        .footer-info a:hover {{
+            color: var(--accent-light);
+            text-decoration: underline;
+        }}
+
+        .highlight {{
+            color: var(--accent-gold);
+            font-weight: 600;
+        }}
+
+        .footer-divider {{
+            display: inline-block;
+            color: var(--text-tertiary);
+            margin: 0 0.8rem;
+            opacity: 0.5;
+        }}
+
+        @media (max-width: 768px) {{
+            .container {{
+                padding: 0;
+            }}
+            
+            header {{
+                padding: 1.8rem 1.2rem;
+                margin-bottom: 1.5rem;
+            }}
+            
+            header h1 {{
+                font-size: 1.7rem;
+            }}
+            
+            .header-controls {{
+                flex-direction: column;
+                gap: 0.8rem;
+            }}
+            
+            .search-box {{
+                width: 100%;
+                min-width: auto;
+            }}
+            
+            main {{
+                padding: 1.5rem;
+                margin-bottom: 1.5rem;
+            }}
+            
+            .grid-view {{
+                grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+                gap: 1rem;
+            }}
+            
+            .card {{
+                padding: 1rem;
+            }}
+            
+            .card-icon {{
+                font-size: 2rem;
+            }}
+            
+            .card-name {{
+                font-size: 0.88rem;
+            }}
+            
+            .list-view .card {{
+                flex-wrap: wrap;
+                gap: 0.8rem;
+                padding: 1rem;
+            }}
+            
+            .list-view .card-icon {{
+                min-width: auto;
+                order: 0;
+            }}
+            
+            .list-view .card-name {{
+                width: 100%;
+                order: 1;
+                text-align: left;
+            }}
+            
+            .list-view .card-meta {{
+                min-width: auto;
+                flex-direction: row;
+                justify-content: space-between;
+                width: 100%;
+                order: 2;
+                text-align: left;
+            }}
+            
+            .list-view .card-actions {{
+                width: 100%;
+                order: 3;
+                min-width: auto;
+                margin-top: 0.6rem;
+            }}
+            
+            .author-links {{
+                flex-direction: column;
+                align-items: center;
+            }}
+            
+            .author-link {{
+                width: 100%;
+                max-width: 260px;
+                justify-content: center;
+            }}
+
+            footer {{
+                padding: 2rem 1.2rem;
+            }}
+
+            .footer-info {{
+                font-size: 0.85rem;
+            }}
+        }}
+
+        @media (max-width: 480px) {{
+            header h1 {{
+                font-size: 1.4rem;
+            }}
+
+            header .subtitle {{
+                font-size: 0.95rem;
+            }}
+            
+            .grid-view {{
+                grid-template-columns: 1fr 1fr;
+                gap: 0.8rem;
+            }}
+
+            .card {{
+                padding: 0.9rem;
+            }}
+
+            .card-icon {{
+                font-size: 1.8rem;
+            }}
+
+            .card-name {{
+                font-size: 0.8rem;
+            }}
+
+            .card-meta {{
+                font-size: 0.7rem;
+            }}
+
+            main {{
+                padding: 1.2rem;
+            }}
+        }}
+    </style>
 </head>
 <body>
-<div class="header">
-    <h1>Lc3124的文件库</h1>
-    <p>文件目录 · 点击文件夹展开/折叠</p>
-    <p>更新时间: {now}</p>
-</div>
-<div class="directory-tree">{tree_html}</div>
-<div class="footer">
-    <p>index由脚本生成～ 联系方式：lc3124@aliyun.com</p>
-    <p>          可以联系我来托管文件</p>
-    <p>本页由cloudflare托管，文件由aliyunOSS存储和分发</p>
-    <p> PS:请不要无意义大量下载文件哦，OSS服务很贵的qwq</p>
-</div>
+    <div class="container">
+        <header>
+            <h1>✨ Lc3124 的文件库</h1>
+            <p class="subtitle">欢迎来到这里，随意看看吧</p>
+            
+            <div class="header-controls">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="🔍 搜索文件或文件夹...">
+                </div>
+                
+                <div class="view-toggle">
+                    <button class="view-btn active" id="gridViewBtn" title="网格视图">
+                        <span>▦</span> 网格
+                    </button>
+                    <button class="view-btn" id="listViewBtn" title="列表视图">
+                        <span>☰</span> 列表
+                    </button>
+                </div>
+            </div>
+        </header>
 
-<script>
-// 文件夹展开/折叠
-document.querySelectorAll('.dir-header').forEach(h => {{
-    h.querySelector('.dl-folder-btn').onclick = e => e.stopPropagation()
-    h.onclick = () => {{
-        const c = h.nextElementSibling
-        const icon = h.querySelector('.folder-icon')
-        if(c.style.display === 'none'){{
-            c.style.display = 'block'
-            icon.textContent = '📂'
-        }}else{{
-            c.style.display = 'none'
-            icon.textContent = '📁'
+        <div class="breadcrumb" id="breadcrumb">
+            <span class="breadcrumb-item active" data-path="">🏠 根目录</span>
+        </div>
+
+        <main>
+            <div class="grid-view" id="contentGrid">
+            </div>
+            
+            <div class="empty-state" id="emptyState" style="display: none;">
+                <div class="empty-state-icon">📭</div>
+                <p>什么都没有找到呢...</p>
+            </div>
+        </main>
+
+        <footer>
+            <div class="footer-content">
+                <div class="author-section">
+                    <div class="author-avatar">
+                        <img src="{head_img_url}" alt="头像" onerror="this.style.display='none'">
+                    </div>
+                    <div class="author-name">Lc3124</div>
+                    <div class="author-tagline">诶，你好哇 >w< !!</div>
+                    
+                    <div class="author-links">
+                        <a href="mailto:lc3124@aliyun.com" class="author-link">
+                            ✉️ 联系邮箱
+                        </a>
+                        <a href="https://github.com/lc-3124" target="_blank" class="author-link">
+                            💻 GitHub
+                        </a>
+                        <a href="tencent://message/?uin=3418746552" class="author-link">
+                            💝 赞助
+                        </a>
+                    </div>
+                </div>
+                
+                <div class="footer-info">
+                    <p>
+                        <span class="highlight">Index</span> 由脚本自动生成 ~ 
+                        <a href="mailto:lc3124@aliyun.com">联系方式：lc3124@aliyun.com</a>
+                    </p>
+                    <p>
+                        可以联系我来托管文件
+                        <span class="footer-divider">|</span>
+                        本页由 <span class="highlight">Cloudflare</span> 托管
+                        <span class="footer-divider">|</span>
+                        文件由 <span class="highlight">阿里云 OSS</span> 存储和分发
+                    </p>
+                    <p style="margin-top: 1rem; font-style: italic;">
+                        📝 这是 Lc 和朋友萌分享和存储文件的地方，请不要到处传播哦～
+                    </p>
+                    <p style="margin-top: 0.8rem;">
+                        🚨 <span class="highlight">请不要无意义大量下载文件</span>，OSS 服务很贵的 qwq，压岁钱经不起下载😭
+                    </p>
+                    <p style="margin-top: 1.2rem; color: var(--text-tertiary); font-size: 0.8rem;">
+                        最后更新: <span class="highlight">{now}</span>
+                    </p>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        const allFiles = {files_json};
+        let currentPath = '';
+        let searchQuery = '';
+        let currentView = localStorage.getItem('viewMode') || 'grid';
+        
+        document.addEventListener('DOMContentLoaded', function() {{
+            initViewToggle();
+            renderContent();
+            document.getElementById('searchInput').addEventListener('input', function(e) {{
+                searchQuery = e.target.value.toLowerCase().trim();
+                renderContent();
+            }});
+        }});
+        
+        function initViewToggle() {{
+            const gridBtn = document.getElementById('gridViewBtn');
+            const listBtn = document.getElementById('listViewBtn');
+            const grid = document.getElementById('contentGrid');
+            
+            function setView(view) {{
+                currentView = view;
+                localStorage.setItem('viewMode', view);
+                
+                if (view === 'grid') {{
+                    gridBtn.classList.add('active');
+                    listBtn.classList.remove('active');
+                    grid.className = 'grid-view';
+                }} else {{
+                    listBtn.classList.add('active');
+                    gridBtn.classList.remove('active');
+                    grid.className = 'list-view';
+                }}
+            }}
+            
+            gridBtn.addEventListener('click', () => setView('grid'));
+            listBtn.addEventListener('click', () => setView('list'));
+            
+            setView(currentView);
         }}
-    }}
-}})
-
-// 文件夹批量下载（连续发起下载请求）
-function downloadFolder(btn){{
-    const dirEl = btn.closest('.directory')
-    const files = dirEl.querySelectorAll('.file a[download]')
-    files.forEach((a, i) => {{
-        setTimeout(() => {{
-            const link = document.createElement('a')
-            link.href = a.href
-            link.download = a.download
-            link.style.display = 'none'
-            document.body.appendChild(link)
-            link.click()
-            document.body.removeChild(link)
-        }}, i * 120)
-    }})
-}}
-</script>
+        
+        function getCurrentItems() {{
+            const items = {{}};
+            
+            allFiles.forEach(file => {{
+                const filePath = file.path;
+                
+                if (searchQuery && !filePath.toLowerCase().includes(searchQuery)) {{
+                    return;
+                }}
+                
+                if (searchQuery) {{
+                    items[filePath] = {{
+                        type: 'file',
+                        ...file
+                    }};
+                    return;
+                }}
+                
+                if (!filePath.startsWith(currentPath)) {{
+                    return;
+                }}
+                
+                const relativePath = filePath.slice(currentPath.length);
+                const parts = relativePath.split('/').filter(p => p);
+                
+                if (parts.length === 0) {{
+                    return;
+                }}
+                
+                const itemName = parts[0];
+                
+                if (parts.length === 1) {{
+                    items[itemName] = {{
+                        type: 'file',
+                        ...file
+                    }};
+                }} else {{
+                    if (!items[itemName]) {{
+                        items[itemName] = {{
+                            type: 'dir',
+                            name: itemName,
+                            path: currentPath + itemName + '/'
+                        }};
+                    }}
+                }}
+            }});
+            
+            return Object.values(items).sort((a, b) => {{
+                if (a.type !== b.type) {{
+                    return a.type === 'dir' ? -1 : 1;
+                }}
+                return a.name.localeCompare(b.name);
+            }});
+        }}
+        
+        function renderContent() {{
+            const grid = document.getElementById('contentGrid');
+            const emptyState = document.getElementById('emptyState');
+            const items = getCurrentItems();
+            
+            grid.innerHTML = '';
+            
+            if (items.length === 0) {{
+                emptyState.style.display = 'block';
+                return;
+            }}
+            
+            emptyState.style.display = 'none';
+            
+            items.forEach(item => {{
+                const card = document.createElement('div');
+                card.className = 'card';
+                
+                if (item.type === 'dir') {{
+                    card.innerHTML = `
+                        <div class="card-icon">📁</div>
+                        <div class="card-name">${{escapeHtml(item.name)}}</div>
+                    `;
+                    card.addEventListener('click', () => {{
+                        if (!searchQuery) {{
+                            navigateTo(item.path);
+                        }}
+                    }});
+                }} else {{
+                    const icon = getFileIcon(item.path);
+                    card.innerHTML = `
+                        <div class="card-icon">${{icon}}</div>
+                        <div class="card-name">${{escapeHtml(item.name || item.path.split('/').pop())}}</div>
+                        <div class="card-meta">
+                            <span>${{item.size_str}}</span>
+                            <span>${{item.modify_time}}</span>
+                        </div>
+                        <div class="card-actions">
+                            <a href="${{item.download_url}}" target="_blank" class="btn btn-secondary">预览</a>
+                            <a href="${{item.download_url}}" download class="btn btn-primary">下载</a>
+                        </div>
+                    `;
+                    card.addEventListener('click', (e) => {{
+                        if (e.target.tagName === 'A') return;
+                    }});
+                }}
+                
+                grid.appendChild(card);
+            }});
+            
+            renderBreadcrumb();
+        }}
+        
+        function navigateTo(path) {{
+            currentPath = path;
+            renderContent();
+        }}
+        
+        function goToPath(path) {{
+            currentPath = path;
+            renderContent();
+        }}
+        
+        function renderBreadcrumb() {{
+            const breadcrumb = document.getElementById('breadcrumb');
+            breadcrumb.innerHTML = '';
+            
+            if (searchQuery) {{
+                const item = document.createElement('span');
+                item.className = 'breadcrumb-item active';
+                item.textContent = `🔍 搜索: "${{searchQuery}}"`;
+                breadcrumb.appendChild(item);
+                
+                const clearBtn = document.createElement('span');
+                clearBtn.className = 'breadcrumb-item';
+                clearBtn.textContent = '✕ 清除搜索';
+                clearBtn.style.marginLeft = 'auto';
+                clearBtn.addEventListener('click', () => {{
+                    searchQuery = '';
+                    document.getElementById('searchInput').value = '';
+                    renderContent();
+                }});
+                breadcrumb.appendChild(clearBtn);
+                return;
+            }}
+            
+            const parts = currentPath.split('/').filter(p => p);
+            
+            const rootItem = document.createElement('span');
+            rootItem.className = 'breadcrumb-item' + (parts.length === 0 ? ' active' : '');
+            rootItem.textContent = '🏠 根目录';
+            if (parts.length > 0) {{
+                rootItem.style.cursor = 'pointer';
+                rootItem.addEventListener('click', () => goToPath(''));
+            }}
+            breadcrumb.appendChild(rootItem);
+            
+            let pathSoFar = '';
+            parts.forEach((part, index) => {{
+                pathSoFar += part + '/';
+                const finalPath = pathSoFar;
+                
+                const separator = document.createElement('span');
+                separator.className = 'breadcrumb-separator';
+                separator.textContent = '/';
+                breadcrumb.appendChild(separator);
+                
+                const item = document.createElement('span');
+                item.className = 'breadcrumb-item' + (index === parts.length - 1 ? ' active' : '');
+                item.textContent = part;
+                
+                if (index < parts.length - 1) {{
+                    item.style.cursor = 'pointer';
+                    item.addEventListener('click', () => goToPath(finalPath));
+                }}
+                
+                breadcrumb.appendChild(item);
+            }});
+        }}
+        
+        function getFileIcon(fileName) {{
+            const ext = fileName.toLowerCase().split('.').pop() || '';
+            if (['txt', 'md', 'doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx'].includes(ext)) {{
+                if (ext === 'txt' || ext === 'md') return '📄';
+                if (ext === 'pdf') return '📃';
+                return '📊';
+            }}
+            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(ext)) return '🖼️';
+            if (['mp3', 'wav', 'flac', 'm4a', 'ogg'].includes(ext)) return '🎵';
+            if (['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv'].includes(ext)) return '🎬';
+            if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '🗜️';
+            if (['py', 'js', 'html', 'css', 'java', 'cpp', 'c', 'php'].includes(ext)) return '💻';
+            return '📎';
+        }}
+        
+        function escapeHtml(text) {{
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }}
+    </script>
 </body>
 </html>
 '''
+    return html_content
 
 def main():
+    """主函数：获取OSS文件列表并生成HTML"""
     try:
-        print("获取文件列表...")
-        r = subprocess.run(["ossutil", "ls", OSS_BUCKET], capture_output=True, text=True, encoding="utf-8")
+        print("正在获取OSS文件列表...")
+        r = subprocess.run(
+            ["ossutil", "ls", OSS_BUCKET],
+            capture_output=True,
+            text=True,
+            encoding="utf-8"
+        )
+        
         if r.returncode != 0:
-            print("ossutil 错误:", r.stderr)
+            print(f"ossutil 执行错误: {r.stderr}")
             return
+        
         files = parse_oss_output(r.stdout)
-        tree = build_directory_tree(files)
-        html = generate_html(tree)
+        if not files:
+            print("未获取到任何文件")
+            return
+        
+        html_content = generate_html(files)
+        
         with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
-            f.write(html)
-        print(f"生成完成: {OUTPUT_HTML}，共 {len(files)} 个文件")
+            f.write(html_content)
+        
+        print(f"HTML生成完成: {OUTPUT_HTML}")
+        print(f"共处理 {len(files)} 个文件")
+        
+    except FileNotFoundError:
+        print("错误：未找到ossutil工具，请确保已安装并配置好ossutil")
     except Exception as e:
-        print("错误:", e)
+        print(f"执行错误: {str(e)}")
 
 if __name__ == "__main__":
     main()
-
