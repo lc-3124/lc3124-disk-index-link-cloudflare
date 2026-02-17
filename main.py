@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-OSS文件目录生成 - 蓝黑科技版
-带：右侧预览/下载按钮、文件夹批量下载、在线预览
-"""
 import subprocess
 import re
 import html
@@ -237,9 +233,9 @@ body{{
 <div class="directory-tree">{tree_html}</div>
 <div class="footer">
     <p>index由脚本生成～ 联系方式：lc3124@aliyun.com</p>
-    <p>index可以联系我来托管文件</p>
-    <p>index本页由cloudflare托管，文件由aliyunOSS存储和分发</p>
-    <p>indexPS:请不要无意义大量下载文件哦，OSS服务很贵的qwq</p>
+    <p>          可以联系我来托管文件</p>
+    <p>本页由cloudflare托管，文件由aliyunOSS存储和分发</p>
+    <p> PS:请不要无意义大量下载文件哦，OSS服务很贵的qwq</p>
 </div>
 
 <script>
