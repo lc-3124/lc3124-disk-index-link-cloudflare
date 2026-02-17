@@ -10,6 +10,8 @@ from datetime import datetime
 OSS_BUCKET = "oss://lc3124-web-disk/"
 OUTPUT_HTML = "index.html"
 OSS_PUBLIC_URL = "https://lc3124-web-disk.oss-cn-beijing.aliyuncs.com/"
+# 开启调试模式，仅打印关键错误，避免刷屏
+DEBUG_MODE = False
 # ------------------------------------------------------------
 
 def format_file_size(size_bytes):
@@ -27,62 +29,100 @@ def get_file_icon(file_name):
     """根据文件名后缀返回对应的图标"""
     ext = file_name.lower().split('.')[-1] if '.' in file_name else ''
     
-    # 文档类
-    if ext in ['txt', 'md', 'doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx']:
-        return '📄' if ext in ['txt', 'md'] else '📃' if ext == 'pdf' else '📊'
+    # 文档类（补充文库本常用格式）
+    if ext in ['txt', 'md', 'doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'log', 'cue', 'm3u', 'm3u8']:
+        return '📄' if ext in ['txt', 'md', 'log', 'cue', 'm3u', 'm3u8'] else '📃' if ext == 'pdf' else '📊'
     # 图片类
-    elif ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp']:
+    elif ext in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp', 'tif', 'tiff']:
         return '🖼️'
     # 音频类
-    elif ext in ['mp3', 'wav', 'flac', 'm4a', 'ogg']:
+    elif ext in ['mp3', 'wav', 'flac', 'm4a', 'ogg', 'ape', 'wma']:
         return '🎵'
     # 视频类
-    elif ext in ['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv']:
+    elif ext in ['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv', 'webm']:
         return '🎬'
     # 压缩包
-    elif ext in ['zip', 'rar', '7z', 'tar', 'gz']:
+    elif ext in ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz']:
         return '🗜️'
     # 代码类
-    elif ext in ['py', 'js', 'html', 'css', 'java', 'cpp', 'c', 'php']:
+    elif ext in ['py', 'js', 'html', 'css', 'java', 'cpp', 'c', 'php', 'sh', 'bat']:
         return '💻'
+    # 可执行文件
+    elif ext in ['exe', 'msi', 'deb', 'rpm']:
+        return '⚙️'
     # 其他
     else:
         return '📎'
 
 def parse_oss_output(output):
-    """解析ossutil输出，提取文件信息"""
+    """
+    精准解析你的 ossutil 输出格式：
+    时间 +0800 CST  大小  存储类型  ETAG(可含-数字)  路径
+    """
     files_info = []
-    pattern = r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) .*? (\d+) .*? oss://lc3124-web-disk/(.*)"
+    # 核心修复：兼容 ETAG 带 -数字 后缀的格式，同时匹配纯字符串 ETAG
+    pattern = re.compile(
+        r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \+0800 CST\s+(\d+)\s+(\w+)\s+([\w-]+)\s+oss://lc3124-web-disk/(.*)$",
+        re.MULTILINE
+    )
+    
+    match_failed_lines = []
     for line in output.split("\n"):
         line = line.strip()
+        # 跳过空行、统计行
         if not line or "Object Number is:" in line:
             continue
-        match = re.match(pattern, line)
+        
+        match = pattern.match(line)
         if match:
             modify_time = match.group(1)
             file_size = int(match.group(2))
-            file_path = match.group(3)
+            file_path = match.group(5)
+            
+            # 时间格式化容错
             try:
                 dt = datetime.strptime(modify_time, "%Y-%m-%d %H:%M:%S")
                 formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
             except:
                 formatted_time = modify_time
 
-            download_url = f"{OSS_PUBLIC_URL}{html.escape(file_path)}"
-            files_info.append({
-                "path": file_path,
-                "name": file_path.split('/')[-1],
-                "size": file_size,
-                "size_str": format_file_size(file_size),
-                "modify_time": formatted_time,
-                "download_url": download_url
-            })
+            # 区分文件夹和文件：路径以/结尾、大小为0 → 文件夹
+            if file_size == 0 and file_path.endswith('/'):
+                files_info.append({
+                    "type": "dir",
+                    "path": file_path,
+                    "name": file_path.rstrip('/').split('/')[-1],
+                    "size": 0,
+                    "size_str": "文件夹",
+                    "modify_time": formatted_time
+                })
+            # 普通文件（含带后缀 ETAG 的文件）
+            else:
+                download_url = f"{OSS_PUBLIC_URL}{html.escape(file_path)}"
+                files_info.append({
+                    "type": "file",
+                    "path": file_path,
+                    "name": file_path.split('/')[-1],
+                    "size": file_size,
+                    "size_str": format_file_size(file_size),
+                    "modify_time": formatted_time,
+                    "download_url": download_url
+                })
+        else:
+            match_failed_lines.append(line)
+    
+    # 调试模式仅打印前5行匹配失败的行
+    if DEBUG_MODE and match_failed_lines:
+        print(f"⚠️  匹配失败的行（共{len(match_failed_lines)}行，仅显示前5行）：")
+        for line in match_failed_lines[:5]:
+            print(f"  → {line}")
+
     return files_info
 
 def generate_html(files_info):
-    """生成完整的HTML页面"""
+    """生成完整的HTML页面，保留原有UI风格"""
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    files_json = json.dumps(files_info)
+    files_json = json.dumps(files_info, ensure_ascii=False)
     head_img_url = f"head.jpg"
     
     html_content = f'''
@@ -921,18 +961,18 @@ def generate_html(files_info):
             allFiles.forEach(file => {{
                 const filePath = file.path;
                 
+                // 搜索逻辑：匹配全路径，兼容中文
                 if (searchQuery && !filePath.toLowerCase().includes(searchQuery)) {{
                     return;
                 }}
                 
+                // 搜索模式下直接显示所有匹配的文件/文件夹
                 if (searchQuery) {{
-                    items[filePath] = {{
-                        type: 'file',
-                        ...file
-                    }};
+                    items[filePath] = file;
                     return;
                 }}
                 
+                // 非搜索模式：过滤当前目录下的直接内容
                 if (!filePath.startsWith(currentPath)) {{
                     return;
                 }}
@@ -946,12 +986,11 @@ def generate_html(files_info):
                 
                 const itemName = parts[0];
                 
+                // 当前目录下的直接文件/文件夹
                 if (parts.length === 1) {{
-                    items[itemName] = {{
-                        type: 'file',
-                        ...file
-                    }};
+                    items[itemName] = file;
                 }} else {{
+                    // 子目录，生成文件夹条目（避免重复）
                     if (!items[itemName]) {{
                         items[itemName] = {{
                             type: 'dir',
@@ -962,11 +1001,12 @@ def generate_html(files_info):
                 }}
             }});
             
+            // 排序：文件夹在前，中文按拼音升序
             return Object.values(items).sort((a, b) => {{
                 if (a.type !== b.type) {{
                     return a.type === 'dir' ? -1 : 1;
                 }}
-                return a.name.localeCompare(b.name);
+                return a.name.localeCompare(b.name, 'zh-CN');
             }});
         }}
         
@@ -992,6 +1032,10 @@ def generate_html(files_info):
                     card.innerHTML = `
                         <div class="card-icon">📁</div>
                         <div class="card-name">${{escapeHtml(item.name)}}</div>
+                        <div class="card-meta">
+                            <span>${{item.size_str || '文件夹'}}</span>
+                            <span>${{item.modify_time || ''}}</span>
+                        </div>
                     `;
                     card.addEventListener('click', () => {{
                         if (!searchQuery) {{
@@ -1058,19 +1102,19 @@ def generate_html(files_info):
             
             const parts = currentPath.split('/').filter(p => p);
             
+            // 根目录
             const rootItem = document.createElement('span');
             rootItem.className = 'breadcrumb-item' + (parts.length === 0 ? ' active' : '');
             rootItem.textContent = '🏠 根目录';
             if (parts.length > 0) {{
-                rootItem.style.cursor = 'pointer';
                 rootItem.addEventListener('click', () => goToPath(''));
             }}
             breadcrumb.appendChild(rootItem);
             
+            // 多级目录
             let pathSoFar = '';
             parts.forEach((part, index) => {{
                 pathSoFar += part + '/';
-                const finalPath = pathSoFar;
                 
                 const separator = document.createElement('span');
                 separator.className = 'breadcrumb-separator';
@@ -1082,8 +1126,7 @@ def generate_html(files_info):
                 item.textContent = part;
                 
                 if (index < parts.length - 1) {{
-                    item.style.cursor = 'pointer';
-                    item.addEventListener('click', () => goToPath(finalPath));
+                    item.addEventListener('click', () => goToPath(pathSoFar));
                 }}
                 
                 breadcrumb.appendChild(item);
@@ -1092,16 +1135,17 @@ def generate_html(files_info):
         
         function getFileIcon(fileName) {{
             const ext = fileName.toLowerCase().split('.').pop() || '';
-            if (['txt', 'md', 'doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx'].includes(ext)) {{
-                if (ext === 'txt' || ext === 'md') return '📄';
+            if (['txt', 'md', 'doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'log', 'cue', 'm3u', 'm3u8'].includes(ext)) {{
+                if (['txt', 'md', 'log', 'cue', 'm3u', 'm3u8'].includes(ext)) return '📄';
                 if (ext === 'pdf') return '📃';
                 return '📊';
             }}
-            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp'].includes(ext)) return '🖼️';
-            if (['mp3', 'wav', 'flac', 'm4a', 'ogg'].includes(ext)) return '🎵';
-            if (['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv'].includes(ext)) return '🎬';
-            if (['zip', 'rar', '7z', 'tar', 'gz'].includes(ext)) return '🗜️';
-            if (['py', 'js', 'html', 'css', 'java', 'cpp', 'c', 'php'].includes(ext)) return '💻';
+            if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp', 'tif', 'tiff'].includes(ext)) return '🖼️';
+            if (['mp3', 'wav', 'flac', 'm4a', 'ogg', 'ape', 'wma'].includes(ext)) return '🎵';
+            if (['mp4', 'avi', 'mov', 'mkv', 'flv', 'wmv', 'webm'].includes(ext)) return '🎬';
+            if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz'].includes(ext)) return '🗜️';
+            if (['py', 'js', 'html', 'css', 'java', 'cpp', 'c', 'php', 'sh', 'bat'].includes(ext)) return '💻';
+            if (['exe', 'msi', 'deb', 'rpm'].includes(ext)) return '⚙️';
             return '📎';
         }}
         
@@ -1117,37 +1161,41 @@ def generate_html(files_info):
     return html_content
 
 def main():
-    """主函数：获取OSS文件列表并生成HTML"""
+    """主函数：适配你的 ossutil 命令，无 -r 参数"""
     try:
-        print("正在获取OSS文件列表...")
+        print("正在获取OSS全量文件列表（适配你的ossutil格式）...")
+        # 核心修复：删除 -r 参数，完全匹配你的命令
         r = subprocess.run(
             ["ossutil", "ls", OSS_BUCKET],
             capture_output=True,
             text=True,
-            encoding="utf-8"
+            encoding="utf-8",
+            errors="ignore"
         )
         
         if r.returncode != 0:
-            print(f"ossutil 执行错误: {r.stderr}")
+            print(f"❌ ossutil 执行错误: {r.stderr.strip() or '未知错误，请检查ossutil配置'}")
             return
         
         files = parse_oss_output(r.stdout)
+        
         if not files:
-            print("未获取到任何文件")
+            print("⚠️  未解析到任何文件/文件夹")
             return
         
+        print(f"✅ 成功解析 {len(files)} 个文件/文件夹")
         html_content = generate_html(files)
         
         with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
             f.write(html_content)
         
-        print(f"HTML生成完成: {OUTPUT_HTML}")
-        print(f"共处理 {len(files)} 个文件")
+        print(f"🎉 生成完成：{OUTPUT_HTML}")
         
     except FileNotFoundError:
-        print("错误：未找到ossutil工具，请确保已安装并配置好ossutil")
+        print("❌ 错误：未找到ossutil，请确保其在系统PATH中")
     except Exception as e:
-        print(f"执行错误: {str(e)}")
+        print(f"❌ 执行异常: {str(e)}")
 
 if __name__ == "__main__":
     main()
+
