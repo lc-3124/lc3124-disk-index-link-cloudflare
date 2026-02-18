@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+OSS文件列表HTML生成工具
+功能：调用ossutil获取阿里云OSS桶内文件/文件夹信息，生成带可视化界面的静态HTML文件
+核心特性：支持网格/列表视图、目录导航、搜索、下载跳转（./gen.html?path=文件路径）
+"""
 import subprocess
 import re
 import html
@@ -7,15 +12,17 @@ import json
 from datetime import datetime
 
 # -------------------------- 配置项 --------------------------
-OSS_BUCKET = "oss://lc3124-web-disk/"
-OUTPUT_HTML = "index.html"
-OSS_PUBLIC_URL = "https://lc3124-web-disk.oss-cn-beijing.aliyuncs.com/"
-# 开启调试模式，仅打印关键错误，避免刷屏
-DEBUG_MODE = False
+OSS_BUCKET = "oss://lc3124-web-disk/"  # OSS桶地址
+OUTPUT_HTML = "index.html"             # 生成的HTML文件名
+OSS_PUBLIC_URL = "https://lc3124-web-disk.oss-cn-beijing.aliyuncs.com/"  # OSS公网访问地址
 # ------------------------------------------------------------
 
 def format_file_size(size_bytes):
-    """格式化文件大小为易读格式"""
+    """
+    将字节数格式化为易读的文件大小
+    :param size_bytes: 字节数
+    :return: 格式化后的大小字符串（如 1.50 MB）
+    """
     if size_bytes == 0:
         return "0 B"
     size_names = ["B", "KB", "MB", "GB"]
@@ -26,10 +33,14 @@ def format_file_size(size_bytes):
     return f"{size_bytes:.2f} {size_names[i]}"
 
 def get_file_icon(file_name):
-    """根据文件名后缀返回对应的图标"""
+    """
+    根据文件后缀返回对应的emoji图标
+    :param file_name: 文件名
+    :return: 对应类型的emoji图标
+    """
     ext = file_name.lower().split('.')[-1] if '.' in file_name else ''
     
-    # 文档类（补充文库本常用格式）
+    # 文档类
     if ext in ['txt', 'md', 'doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'log', 'cue', 'm3u', 'm3u8']:
         return '📄' if ext in ['txt', 'md', 'log', 'cue', 'm3u', 'm3u8'] else '📃' if ext == 'pdf' else '📊'
     # 图片类
@@ -50,26 +61,26 @@ def get_file_icon(file_name):
     # 可执行文件
     elif ext in ['exe', 'msi', 'deb', 'rpm']:
         return '⚙️'
-    # 其他
+    # 其他类型
     else:
         return '📎'
 
 def parse_oss_output(output):
     """
-    精准解析你的 ossutil 输出格式：
-    时间 +0800 CST  大小  存储类型  ETAG(可含-数字)  路径
+    解析ossutil ls命令的输出内容，提取文件/文件夹信息（仅保留纯路径，剔除OSS域名）
+    :param output: ossutil命令的输出文本
+    :return: 包含文件/文件夹信息的列表
     """
     files_info = []
-    # 核心修复：兼容 ETAG 带 -数字 后缀的格式，同时匹配纯字符串 ETAG
+    # 正则匹配ossutil输出格式：时间 +0800 CST  大小  存储类型  ETAG  路径
     pattern = re.compile(
         r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) \+0800 CST\s+(\d+)\s+(\w+)\s+([\w-]+)\s+oss://lc3124-web-disk/(.*)$",
         re.MULTILINE
     )
     
-    match_failed_lines = []
     for line in output.split("\n"):
         line = line.strip()
-        # 跳过空行、统计行
+        # 跳过空行和统计行
         if not line or "Object Number is:" in line:
             continue
         
@@ -77,16 +88,13 @@ def parse_oss_output(output):
         if match:
             modify_time = match.group(1)
             file_size = int(match.group(2))
-            file_path = match.group(5)
+            file_path = match.group(5)  # 直接获取纯路径，无OSS域名/桶前缀
             
-            # 时间格式化容错
-            try:
-                dt = datetime.strptime(modify_time, "%Y-%m-%d %H:%M:%S")
-                formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
-            except:
-                formatted_time = modify_time
+            # 格式化修改时间
+            dt = datetime.strptime(modify_time, "%Y-%m-%d %H:%M:%S")
+            formatted_time = dt.strftime("%Y-%m-%d %H:%M:%S")
 
-            # 区分文件夹和文件：路径以/结尾、大小为0 → 文件夹
+            # 区分文件夹和文件：路径以/结尾且大小为0则为文件夹
             if file_size == 0 and file_path.endswith('/'):
                 files_info.append({
                     "type": "dir",
@@ -96,34 +104,28 @@ def parse_oss_output(output):
                     "size_str": "文件夹",
                     "modify_time": formatted_time
                 })
-            # 普通文件（含带后缀 ETAG 的文件）
+            # 普通文件：仅保留纯路径，用于后续跳转
             else:
-                download_url = f"{OSS_PUBLIC_URL}{html.escape(file_path)}"
                 files_info.append({
                     "type": "file",
-                    "path": file_path,
+                    "path": file_path,  # 纯路径，如：管理员用户文件夹/head.png
                     "name": file_path.split('/')[-1],
                     "size": file_size,
                     "size_str": format_file_size(file_size),
-                    "modify_time": formatted_time,
-                    "download_url": download_url
+                    "modify_time": formatted_time
                 })
-        else:
-            match_failed_lines.append(line)
-    
-    # 调试模式仅打印前5行匹配失败的行
-    if DEBUG_MODE and match_failed_lines:
-        print(f"⚠️  匹配失败的行（共{len(match_failed_lines)}行，仅显示前5行）：")
-        for line in match_failed_lines[:5]:
-            print(f"  → {line}")
 
     return files_info
 
 def generate_html(files_info):
-    """生成完整的HTML页面，保留原有UI风格"""
+    """
+    根据解析的文件信息生成完整的HTML页面（下载跳转：./gen.html?path=文件纯路径）
+    :param files_info: 解析后的文件/文件夹信息列表
+    :return: 完整的HTML文本内容
+    """
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     files_json = json.dumps(files_info, ensure_ascii=False)
-    head_img_url = f"head.jpg"
+    head_img_url = "head.png"  # 直接使用纯路径
     
     html_content = f'''
 <!DOCTYPE html>
@@ -502,6 +504,7 @@ def generate_html(files_info):
         .card-actions .btn {{
             flex: 1;
             text-align: center;
+            text-decoration: none;
         }}
 
         .btn {{
@@ -510,7 +513,6 @@ def generate_html(files_info):
             border-radius: var(--radius-sm);
             font-size: 0.8rem;
             cursor: pointer;
-            text-decoration: none;
             transition: var(--transition);
             font-weight: 500;
             display: inline-block;
@@ -525,19 +527,6 @@ def generate_html(files_info):
         .btn-primary:hover {{
             transform: translateY(-2px);
             box-shadow: 0 8px 20px rgba(88, 166, 255, 0.35);
-        }}
-
-        .btn-secondary {{
-            background: rgba(88, 166, 255, 0.1);
-            color: var(--accent-secondary);
-            border: 1.5px solid rgba(88, 166, 255, 0.3);
-        }}
-
-        .btn-secondary:hover {{
-            background: rgba(88, 166, 255, 0.2);
-            border-color: var(--accent-primary);
-            color: var(--accent-primary);
-            transform: translateY(-1px);
         }}
 
         .empty-state {{
@@ -832,6 +821,7 @@ def generate_html(files_info):
         <header>
             <h1>✨ Lc3124 的文件库</h1>
             <p class="subtitle">欢迎来到这里，随意看看吧</p>
+            <p class="subtitle">目录分级跳转还没有修好，凑合着用用吧～</p>
             
             <div class="header-controls">
                 <div class="search-box">
@@ -961,7 +951,7 @@ def generate_html(files_info):
             allFiles.forEach(file => {{
                 const filePath = file.path;
                 
-                // 搜索逻辑：匹配全路径，兼容中文
+                // 搜索逻辑：匹配全路径
                 if (searchQuery && !filePath.toLowerCase().includes(searchQuery)) {{
                     return;
                 }}
@@ -1029,6 +1019,7 @@ def generate_html(files_info):
                 card.className = 'card';
                 
                 if (item.type === 'dir') {{
+                    // 文件夹：仅显示图标、名称、元信息，无操作按钮
                     card.innerHTML = `
                         <div class="card-icon">📁</div>
                         <div class="card-name">${{escapeHtml(item.name)}}</div>
@@ -1043,6 +1034,7 @@ def generate_html(files_info):
                         }}
                     }});
                 }} else {{
+                    // 文件：显示图标、名称、元信息，添加【去下载】按钮，跳转至./gen.html?path=纯路径
                     const icon = getFileIcon(item.path);
                     card.innerHTML = `
                         <div class="card-icon">${{icon}}</div>
@@ -1052,12 +1044,12 @@ def generate_html(files_info):
                             <span>${{item.modify_time}}</span>
                         </div>
                         <div class="card-actions">
-                            <a href="${{item.download_url}}" target="_blank" class="btn btn-secondary">预览</a>
-                            <a href="${{item.download_url}}" download class="btn btn-primary">下载</a>
+                            <a href="./gen.html?path=${{encodeURIComponent(item.path)}}" class="btn btn-primary" target="_self">去下载</a>
                         </div>
                     `;
+                    // 阻止文件卡片点击的默认行为，仅按钮可跳转
                     card.addEventListener('click', (e) => {{
-                        if (e.target.tagName === 'A') return;
+                        if (e.target.tagName !== 'A') e.preventDefault();
                     }});
                 }}
                 
@@ -1161,40 +1153,36 @@ def generate_html(files_info):
     return html_content
 
 def main():
-    """主函数：适配你的 ossutil 命令，无 -r 参数"""
-    try:
-        print("正在获取OSS全量文件列表（适配你的ossutil格式）...")
-        # 核心修复：删除 -r 参数，完全匹配你的命令
-        r = subprocess.run(
-            ["ossutil", "ls", OSS_BUCKET],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="ignore"
-        )
-        
-        if r.returncode != 0:
-            print(f"❌ ossutil 执行错误: {r.stderr.strip() or '未知错误，请检查ossutil配置'}")
-            return
-        
-        files = parse_oss_output(r.stdout)
-        
-        if not files:
-            print("⚠️  未解析到任何文件/文件夹")
-            return
-        
-        print(f"✅ 成功解析 {len(files)} 个文件/文件夹")
-        html_content = generate_html(files)
-        
-        with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
-            f.write(html_content)
-        
-        print(f"🎉 生成完成：{OUTPUT_HTML}")
-        
-    except FileNotFoundError:
-        print("❌ 错误：未找到ossutil，请确保其在系统PATH中")
-    except Exception as e:
-        print(f"❌ 执行异常: {str(e)}")
+    """主函数：执行OSS列表获取、解析、HTML生成"""
+    # 调用ossutil获取文件列表
+    print("正在获取OSS文件列表...")
+    r = subprocess.run(
+        ["ossutil", "ls", OSS_BUCKET],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="ignore"
+    )
+    
+    # 检查命令执行结果
+    if r.returncode != 0:
+        print(f"OSS命令执行失败: {r.stderr.strip() or '未知错误'}")
+        return
+    
+    # 解析输出内容（仅保留纯路径）
+    files = parse_oss_output(r.stdout)
+    if not files:
+        print("未解析到任何文件/文件夹")
+        return
+    
+    # 生成HTML文件
+    print(f"成功解析 {len(files)} 个文件/文件夹")
+    html_content = generate_html(files)
+    
+    with open(OUTPUT_HTML, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    
+    print(f"HTML文件生成完成：{OUTPUT_HTML}")
 
 if __name__ == "__main__":
     main()
