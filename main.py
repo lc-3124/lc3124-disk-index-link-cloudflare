@@ -1072,13 +1072,13 @@ def generate_html(files_info):
         function renderBreadcrumb() {{
             const breadcrumb = document.getElementById('breadcrumb');
             breadcrumb.innerHTML = '';
-            
+
             if (searchQuery) {{
                 const item = document.createElement('span');
                 item.className = 'breadcrumb-item active';
                 item.textContent = `🔍 搜索: "${{searchQuery}}"`;
                 breadcrumb.appendChild(item);
-                
+
                 const clearBtn = document.createElement('span');
                 clearBtn.className = 'breadcrumb-item';
                 clearBtn.textContent = '✕ 清除搜索';
@@ -1091,9 +1091,9 @@ def generate_html(files_info):
                 breadcrumb.appendChild(clearBtn);
                 return;
             }}
-            
+
             const parts = currentPath.split('/').filter(p => p);
-            
+
             // 根目录
             const rootItem = document.createElement('span');
             rootItem.className = 'breadcrumb-item' + (parts.length === 0 ? ' active' : '');
@@ -1102,26 +1102,30 @@ def generate_html(files_info):
                 rootItem.addEventListener('click', () => goToPath(''));
             }}
             breadcrumb.appendChild(rootItem);
-            
-            // 多级目录
+
+            // 多级目录 - 修复闭包路径问题
             let pathSoFar = '';
             parts.forEach((part, index) => {{
-                pathSoFar += part + '/';
-                
                 const separator = document.createElement('span');
                 separator.className = 'breadcrumb-separator';
                 separator.textContent = '/';
                 breadcrumb.appendChild(separator);
-                
+
                 const item = document.createElement('span');
                 item.className = 'breadcrumb-item' + (index === parts.length - 1 ? ' active' : '');
                 item.textContent = part;
-                
+
+                // 修复核心：保存当前迭代的正确路径，避免闭包引用后续修改的pathSoFar
+                const targetPath = pathSoFar + part + '/';
+                // 所有非当前目录项都添加点击事件
                 if (index < parts.length - 1) {{
-                    item.addEventListener('click', () => goToPath(pathSoFar));
+                    item.addEventListener('click', () => goToPath(targetPath));
                 }}
-                
+
                 breadcrumb.appendChild(item);
+
+                // 更新路径以便下次迭代使用
+                pathSoFar += part + '/';
             }});
         }}
         
