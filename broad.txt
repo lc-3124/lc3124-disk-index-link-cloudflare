@@ -1,7 +1,37 @@
-欢迎朋友门欣赏！网站没有提供下载服务，如需要获取资源，请找lc要下载钥匙！
-最近新上传优秀butter:
-《群青的魔女》("黄油界的空洞骑士"，DLsite 销量榜第一) Windows（精翻）+Android（生肉）。
-以及稀缺touhou音乐专辑:
-《天水的源泉》(2010 Windancer《风神的神德》附属CD) 压缩包，带cue文件和CD封面。
-
-!!! 本网站不传播任何资源，系私人云存储的前端索引，不提供任何互联网服务，仅供Lc自己玩赏 !!!
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>资源索引说明</title>
+    <style>
+        body {
+            font-family: "Microsoft YaHei", 微软雅黑, Arial, sans-serif;
+            background-color: #f5f5f5;
+            padding: 20px;
+            font-size: 16px;
+        }
+        .highlight {
+            color: #d63384;
+            font-weight: bold;
+        }
+        .notice {
+            color: #dc3545;
+            font-weight: 700;
+            font-size: 17px;
+        }
+        .resource {
+            color: #20c997;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    欢迎朋友们欣赏！网站没有提供下载服务，如需要获取资源，请找<span class="highlight">lc</span>要下载钥匙！<br>
+    最近新上传优秀<span class="highlight">butter</span>:<br>
+    《<span class="resource">群青的魔女</span>》("黄油界的空洞骑士"，DLsite 销量榜第一) Windows（精翻）+Android（生肉）。<br>
+    以及稀缺<span class="highlight">touhou</span>音乐专辑:<br>
+    《<span class="resource">天水的源泉</span>》(2010 Windancer《风神的神德》附属CD) 压缩包，带cue文件和CD封面。<br>
+    <br>
+    <span class="notice">!!! 本网站不传播任何资源，系私人云存储的前端索引，不提供任何互联网服务，仅供Lc自己玩赏 !!!</span>
+</body>
+</html>
