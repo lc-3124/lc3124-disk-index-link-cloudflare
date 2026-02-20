@@ -246,8 +246,8 @@
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2), inset 0 1px 2px rgba(88, 166, 255, 0.05);
             /* 减小内边距 */
             padding: 0.6rem 0.8rem;
-            /* 减小外边距 */
-            margin: 0 0 1rem 0;
+            /* 调整外边距：在header后，breadcrumb前 */
+            margin: 0 0 1.5rem 0;
             border-radius: var(--radius-md);
             border: 1px solid rgba(88, 166, 255, 0.1);
             position: relative;
@@ -739,15 +739,14 @@
             </div>
         </header>
 
-        <div class="breadcrumb" id="breadcrumb">
-            <span class="breadcrumb-item active" data-path="">🏠 根目录</span>
-        </div>
-
-        <!-- 公告栏移动到面包屑之后、main之前 -->
+        <!-- 公告栏移到面包屑上方 -->
         <div class="public-section">
-            <!-- 去掉标题中的📢图标 -->
             <h2>公告栏</h2>
             <div class="public-content" id="broadcastContent">加载公告中...</div>
+        </div>
+
+        <div class="breadcrumb" id="breadcrumb">
+            <span class="breadcrumb-item active" data-path="">🏠 根目录</span>
         </div>
 
         <main>
@@ -804,7 +803,7 @@
                         🚨 <span class="highlight">请不要无意义大量下载文件</span>，OSS 服务很贵的 qwq，压岁钱经不起下载😭
                     </p>
                     <p style="margin-top: 1.2rem; color: var(--text-tertiary); font-size: 0.8rem;">
-                        最后更新: <span class="highlight">2026-02-20 18:16:35</span>
+                        最后更新: <span class="highlight">2026-02-20 18:34:19</span>
                     </p>
                 </div>
             </div>
@@ -817,23 +816,46 @@
         let searchQuery = '';
         let currentView = localStorage.getItem('viewMode') || 'grid';
         
-        // 新增：动态加载公告内容
+        // 新增：动态加载公告内容（带详细调试）
         async function loadBroadcastContent() {
             const contentElement = document.getElementById('broadcastContent');
             try {
+                contentElement.textContent = '正在加载公告...';
                 // 发起请求读取broad.txt文件
-                const response = await fetch('broad.txt');
+                console.log('开始加载公告文件: broad.txt');
+                const response = await fetch('broad.txt', {
+                    method: 'GET',
+                    cache: 'no-cache'  // 禁用缓存，确保读取最新内容
+                });
+                
+                console.log('响应状态码:', response.status);
+                console.log('响应状态:', response.statusText);
+                
                 if (!response.ok) {
-                    throw new Error(`HTTP错误，状态码: ${response.status}`);
+                    // 详细的错误状态提示
+                    let errorMsg = '';
+                    if (response.status === 404) {
+                        errorMsg = '找不到broad.txt文件，请检查文件是否存在';
+                    } else if (response.status === 403) {
+                        errorMsg = '没有权限读取broad.txt文件';
+                    } else {
+                        errorMsg = `加载失败 (状态码: ${response.status})`;
+                    }
+                    throw new Error(errorMsg);
                 }
+                
                 // 读取文本内容
                 const content = await response.text();
+                console.log('公告内容:', content);
+                
                 // 设置公告内容，为空时显示默认提示
                 contentElement.textContent = content.trim() || '暂无公告内容';
             } catch (error) {
-                // 加载失败时显示错误提示
+                // 加载失败时显示详细错误提示
                 console.error('加载公告失败:', error);
-                contentElement.textContent = '加载公告内容时出错';
+                // 显示用户友好的错误信息 + 调试提示
+                contentElement.textContent = `加载公告出错: ${error.message}
+（请按F12打开开发者工具 → Console查看详细错误）`;
             }
         }
         
@@ -1064,7 +1086,7 @@
             if (['txt', 'md', 'doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx', 'log', 'cue', 'm3u', 'm3u8'].includes(ext)) {
                 if (['txt', 'md', 'log', 'cue', 'm3u', 'm3u8'].includes(ext)) return '📄';
                 if (ext === 'pdf') return '📃';
-                return '📊';
+                return '🎊';
             }
             if (['jpg', 'jpeg', 'png', 'gif', 'bmp', 'svg', 'webp', 'tif', 'tiff'].includes(ext)) return '🖼️';
             if (['mp3', 'wav', 'flac', 'm4a', 'ogg', 'ape', 'wma'].includes(ext)) return '🎵';
