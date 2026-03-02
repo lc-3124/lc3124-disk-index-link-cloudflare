@@ -1,6 +1,6 @@
 #!/bin/bash
 git pull
-py ./main.py
+python ./main.py
 git add .
 git commit -m "update context"
 git push
